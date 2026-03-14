@@ -6,11 +6,15 @@
     <DockPanel>
 
         <!-- Top bar -->
-        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal">
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" VerticalAlignment="Top">
 
             <Button Content="+" Width="40" Click="NewTab_Click"/>
 
-            <Grid Width="900" Margin="5">
+            <Button Content="◀" Width="40" Click="BackButton_Click"/>
+            <Button Content="▶" Width="40" Click="ForwardButton_Click"/>
+            <Button Content="⟳" Width="40" Click="ReloadButton_Click"/>
+
+            <Grid Width="800" Margin="5">
                 <TextBox x:Name="AddressBar"
                          KeyDown="AddressBar_KeyDown"
                          TextChanged="AddressBar_TextChanged"/>
@@ -28,7 +32,7 @@
                        StaysOpen="False">
                     <Border Background="White" BorderBrush="Gray" BorderThickness="1">
                         <ListBox x:Name="SuggestionList"
-                                 Width="900"
+                                 Width="800"
                                  MouseDoubleClick="Suggestion_Click"/>
                     </Border>
                 </Popup>

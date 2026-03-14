@@ -1,12 +1,12 @@
 ﻿using System;
 using System.IO;
-using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Input;
 using System.Net.Http;
 using System.Text.Json;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 
@@ -27,17 +27,43 @@ namespace CustomBrowserWPF
             );
 
             CreateNewTab("https://www.google.com");
+
+            this.KeyDown += MainWindow_KeyDown;
+
+            // optional drag & drop html files
+            this.AllowDrop = true;
+            this.DragOver += (s, e) => e.Effects = DragDropEffects.Copy;
+            this.Drop += (s, e) =>
+            {
+                if (e.Data.GetDataPresent(DataFormats.FileDrop))
+                {
+                    var files = (string[])e.Data.GetData(DataFormats.FileDrop);
+                    foreach (var file in files)
+                    {
+                        if (Path.GetExtension(file).ToLower() == ".html")
+                            CreateNewTab(new Uri(file).AbsoluteUri);
+                    }
+                }
+            };
         }
 
-        // --- Trim long tab titles ---
+        private void MainWindow_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.F11)
+            {
+                this.WindowState = this.WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+                this.WindowStyle = this.WindowStyle == WindowStyle.None ? WindowStyle.SingleBorderWindow : WindowStyle.None;
+            }
+        }
+
         private string TrimTitle(string title)
         {
             if (string.IsNullOrEmpty(title)) return "New Tab";
             return title.Length > 15 ? title.Substring(0, 12) + "..." : title;
         }
 
-        // --- Create a new tab ---
-        private async void CreateNewTab(string url)
+        // make public so App.xaml.cs can call it
+        public async void CreateNewTab(string url)
         {
             var webview = new WebView2();
             var tab = new TabItem();
@@ -86,20 +112,30 @@ namespace CustomBrowserWPF
                 Dispatcher.Invoke(() => title.Text = TrimTitle(webview.CoreWebView2.DocumentTitle));
             };
 
+            webview.CoreWebView2.NavigationCompleted += (s, e) =>
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    if (BrowserTabs.SelectedItem == tab)
+                    {
+                        string currentUrl = webview.Source?.AbsoluteUri ?? webview.CoreWebView2.Source;
+                        AddressBar.Text = currentUrl;
+                    }
+                });
+            };
+
             webview.CoreWebView2.Navigate(url);
         }
 
-        // --- Open new tabs instead of new windows ---
         private void NewWindowRequested(object? sender, CoreWebView2NewWindowRequestedEventArgs e)
         {
             e.Handled = true;
             Dispatcher.Invoke(() => CreateNewTab(e.Uri));
         }
 
-        // --- Force downloads folder ---
         private void DownloadStarting(object? sender, CoreWebView2DownloadStartingEventArgs e)
         {
-            string forcedPath = @"D:\downloads";
+            string forcedPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Downloads");
             Directory.CreateDirectory(forcedPath);
 
             string fileName = Path.GetFileName(e.ResultFilePath);
@@ -109,26 +145,30 @@ namespace CustomBrowserWPF
             e.Handled = false;
         }
 
-        // --- Navigate ---
         private void Navigate()
         {
-            if (BrowserTabs.SelectedItem is TabItem tab && tab.Content is WebView2 webview)
-            {
-                string input = AddressBar.Text.Trim();
-                if (string.IsNullOrEmpty(input)) return;
+            var webview = GetCurrentWebView();
+            if (webview == null) return;
 
-                string url;
-                bool looksLikeUrl = input.Contains(".") || input.StartsWith("http") || input.StartsWith("localhost");
-                url = looksLikeUrl ? (input.StartsWith("http") ? input : "https://" + input) : "https://www.google.com/search?q=" + Uri.EscapeDataString(input);
+            string input = AddressBar.Text.Trim();
+            if (string.IsNullOrEmpty(input)) return;
 
-                webview.CoreWebView2.Navigate(url);
-            }
+            string url;
+            bool looksLikeUrl = input.Contains(".") || input.StartsWith("http") || input.StartsWith("localhost");
+            url = looksLikeUrl ? (input.StartsWith("http") ? input : "https://" + input) : "https://www.google.com/search?q=" + Uri.EscapeDataString(input);
 
+            webview.CoreWebView2.Navigate(url);
             SuggestionPopup.IsOpen = false;
         }
 
-        private void GoButton_Click(object sender, RoutedEventArgs e) => Navigate();
+        private WebView2? GetCurrentWebView()
+        {
+            if (BrowserTabs.SelectedItem is TabItem tab && tab.Content is WebView2 webview)
+                return webview;
+            return null;
+        }
 
+        private void GoButton_Click(object sender, RoutedEventArgs e) => Navigate();
         private void AddressBar_KeyDown(object sender, KeyEventArgs e)
         {
             if (e.Key == Key.Enter)
@@ -140,12 +180,29 @@ namespace CustomBrowserWPF
 
         private void NewTab_Click(object sender, RoutedEventArgs e) => CreateNewTab("https://www.google.com");
 
-        // --- Placeholder & suggestions ---
+        private void BackButton_Click(object sender, RoutedEventArgs e)
+        {
+            var webview = GetCurrentWebView();
+            if (webview?.CanGoBack == true) webview.GoBack();
+        }
+
+        private void ForwardButton_Click(object sender, RoutedEventArgs e)
+        {
+            var webview = GetCurrentWebView();
+            if (webview?.CanGoForward == true) webview.GoForward();
+        }
+
+        private void ReloadButton_Click(object sender, RoutedEventArgs e)
+        {
+            GetCurrentWebView()?.Reload();
+        }
+
+        // --- Suggestions ---
         private async void AddressBar_TextChanged(object sender, TextChangedEventArgs e)
         {
             AddressPlaceholder.Visibility = string.IsNullOrWhiteSpace(AddressBar.Text) ? Visibility.Visible : Visibility.Hidden;
 
-            if (AddressBar.Text.Length < 2)
+            if (!AddressBar.IsFocused || AddressBar.Text.Length < 2)
             {
                 SuggestionPopup.IsOpen = false;
                 return;
@@ -164,7 +221,11 @@ namespace CustomBrowserWPF
                 string url = "https://suggestqueries.google.com/complete/search?client=firefox&q=" + Uri.EscapeDataString(query);
                 string json = await httpClient.GetStringAsync(url);
                 using JsonDocument doc = JsonDocument.Parse(json);
-                foreach (var item in doc.RootElement[1].EnumerateArray()) list.Add(item.GetString());
+                foreach (var item in doc.RootElement[1].EnumerateArray())
+                {
+                    string? s = item.GetString();
+                    if (s != null) list.Add(s);
+                }
             }
             catch { }
             return list;
