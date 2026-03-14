@@ -1,51 +1,27 @@
-﻿<Window x:Class="CustomBrowserWPF.MainWindow"
+﻿<Window x:Class="WpfInstaller.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
-        Title="browser" Height="800" Width="1200">
-    <DockPanel>
+        Title="Browser Installer" Height="300" Width="600" WindowStartupLocation="CenterScreen">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
 
-        <!-- Top bar -->
-        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" VerticalAlignment="Top">
+        <TextBlock Text="Select installation folder:" FontWeight="Bold"/>
 
-            <Button Content="+" Width="40" Click="NewTab_Click"/>
-
-            <Button Content="◀" Width="40" Click="BackButton_Click"/>
-            <Button Content="▶" Width="40" Click="ForwardButton_Click"/>
-            <Button Content="⟳" Width="40" Click="ReloadButton_Click"/>
-
-            <Grid Width="800" Margin="5">
-                <TextBox x:Name="AddressBar"
-                         KeyDown="AddressBar_KeyDown"
-                         TextChanged="AddressBar_TextChanged"/>
-
-                <TextBlock x:Name="AddressPlaceholder"
-                           Text="Search or enter address"
-                           Foreground="Gray"
-                           Margin="6,0,0,0"
-                           VerticalAlignment="Center"
-                           IsHitTestVisible="False"/>
-
-                <Popup x:Name="SuggestionPopup"
-                       Placement="Bottom"
-                       PlacementTarget="{Binding ElementName=AddressBar}"
-                       StaysOpen="False">
-                    <Border Background="White" BorderBrush="Gray" BorderThickness="1">
-                        <ListBox x:Name="SuggestionList"
-                                 Width="800"
-                                 MouseDoubleClick="Suggestion_Click"/>
-                    </Border>
-                </Popup>
-            </Grid>
-
-            <Button Content="Go"
-                    Width="60"
-                    Click="GoButton_Click"/>
-
+        <StackPanel Orientation="Horizontal" Grid.Row="1" Margin="0,5,0,5">
+            <TextBox x:Name="InstallPathBox" Width="400"/>
+            <Button x:Name="BrowseButton" Content="Browse..." Margin="5,0,0,0" Click="Browse_Click"/>
         </StackPanel>
 
-        <!-- TabControl -->
-        <TabControl x:Name="BrowserTabs"/>
+        <ProgressBar x:Name="InstallProgress" Grid.Row="2" Height="25" Minimum="0" Maximum="100"/>
 
-    </DockPanel>
+        <StackPanel Orientation="Horizontal" Grid.Row="3" HorizontalAlignment="Right" Margin="0,10,0,0">
+            <Button x:Name="InstallButton" Content="Install" Width="100" Click="Install_Click"/>
+            <Button x:Name="FinishButton" Content="Finish" Width="100" Margin="10,0,0,0" Click="Finish_Click" IsEnabled="False"/>
+        </StackPanel>
+    </Grid>
 </Window>
