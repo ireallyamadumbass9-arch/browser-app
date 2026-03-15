@@ -1,6 +1,7 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -70,6 +71,9 @@ namespace CustomBrowserWPF
             AddressBar.PreviewTextInput += (s, e) => { isUserTyping = true; };
             AddressBar.PreviewKeyDown += AddressBar_KeyDown;
             AddressBar.TextChanged += AddressBar_TextChanged;
+
+            // --- load mods after UI initialized ---
+            _ = LoadMods();
         }
 
         private void LoadOrCreateSettings()
@@ -102,9 +106,7 @@ namespace CustomBrowserWPF
         private void MainWindow_KeyDown(object sender, KeyEventArgs e)
         {
             if (e.Key == Key.F11)
-            {
                 ToggleFullscreen();
-            }
         }
 
         private void ToggleFullscreen()
@@ -174,9 +176,7 @@ namespace CustomBrowserWPF
             foreach (TabItem t in BrowserTabs.Items)
             {
                 if (t.Header is Grid g && g.Children.Count == 3 && g.Children[2] is Button b)
-                {
                     b.Visibility = t.IsSelected ? Visibility.Visible : Visibility.Hidden;
-                }
             }
         }
 
@@ -275,8 +275,7 @@ namespace CustomBrowserWPF
 
         private async void AddressBar_TextChanged(object sender, TextChangedEventArgs e)
         {
-            if (isUpdatingAddressBar || !isUserTyping)
-                return;
+            if (isUpdatingAddressBar || !isUserTyping) return;
 
             AddressPlaceholder.Visibility = string.IsNullOrEmpty(AddressBar.Text) && isUserTyping
                 ? Visibility.Visible
@@ -300,7 +299,6 @@ namespace CustomBrowserWPF
 
                 var combined = new List<string>();
 
-                // history matches
                 foreach (var h in suggestions)
                 {
                     if (h.ToLower().Contains(input.ToLower()))
@@ -322,7 +320,6 @@ namespace CustomBrowserWPF
                     }
                 }
 
-                // live google suggestions
                 foreach (var s in liveSuggestions)
                 {
                     if (!combined.Contains(s))
@@ -405,6 +402,65 @@ namespace CustomBrowserWPF
                 File.WriteAllText(settingsPath, "<!DOCTYPE html><html><body><h1>Settings</h1></body></html>");
             }
             CreateNewTab(settingsPath);
+        }
+
+        // ---------- MOD LOADER ----------
+        private async Task LoadMods()
+        {
+            string modsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "mods");
+            if (!Directory.Exists(modsDir))
+                return;
+
+            var modFolders = Directory.GetDirectories(modsDir);
+            var failedMods = new List<string>();
+            var loadedMods = new List<string>();
+
+            foreach (var folder in modFolders)
+            {
+                try
+                {
+                    string configPath = Path.Combine(folder, "mod.json");
+                    bool disabled = false;
+
+                    if (File.Exists(configPath))
+                    {
+                        string json = File.ReadAllText(configPath);
+                        var doc = JsonDocument.Parse(json);
+                        if (doc.RootElement.TryGetProperty("Disabled", out var prop))
+                            disabled = prop.GetBoolean();
+                    }
+
+                    if (disabled)
+                        continue;
+
+                    var dlls = Directory.GetFiles(folder, "*.dll");
+                    if (dlls.Length == 0)
+                    {
+                        failedMods.Add(System.IO.Path.GetFileName(folder));
+                        continue;
+                    }
+
+                    string dllPath = dlls[0];
+                    Assembly.LoadFrom(dllPath);
+                    loadedMods.Add(System.IO.Path.GetFileName(folder));
+                }
+                catch
+                {
+                    failedMods.Add(System.IO.Path.GetFileName(folder));
+                }
+            }
+
+            string message = "Mods loaded:\n";
+            if (loadedMods.Count > 0)
+                message += string.Join("\n", loadedMods);
+            else
+                message += "None";
+
+            if (failedMods.Count > 0)
+                message += "\n\nFailed to load:\n" + string.Join("\n", failedMods);
+
+            await Task.Delay(100);
+            MessageBox.Show(message, "Mod Loader", MessageBoxButton.OK, MessageBoxImage.Information);
         }
     }
 }
