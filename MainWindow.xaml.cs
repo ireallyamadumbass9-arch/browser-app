@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using Microsoft.Win32;
 using IWshRuntimeLibrary;
+using System.Text.Json;
 
 namespace WpfInstaller
 {
@@ -33,6 +34,7 @@ namespace WpfInstaller
         {
             InitializeComponent();
             InstallPathBox.Text = defaultInstall;
+            AddonCodeBox.IsEnabled = false; // disabled by default
 
             if (Directory.Exists(defaultInstall) && Directory.GetFiles(defaultInstall).Length > 0)
                 InstallButton.Content = "Update";
@@ -42,7 +44,17 @@ namespace WpfInstaller
         {
             var dlg = new OpenFileDialog { CheckFileExists = false, CheckPathExists = true, FileName = "Select folder" };
             if (dlg.ShowDialog() == true)
-                InstallPathBox.Text = Path.GetDirectoryName(dlg.FileName)!;
+                InstallPathBox.Text = System.IO.Path.GetDirectoryName(dlg.FileName)!;
+        }
+
+        private void AllowAddons_Checked(object sender, RoutedEventArgs e)
+        {
+            AddonCodeBox.IsEnabled = true;
+        }
+
+        private void AllowAddons_Unchecked(object sender, RoutedEventArgs e)
+        {
+            AddonCodeBox.IsEnabled = false;
         }
 
         private async void Install_Click(object sender, RoutedEventArgs e)
@@ -66,8 +78,8 @@ namespace WpfInstaller
                 foreach (string fileUrl in filesToDownload)
                 {
                     currentFileIndex++;
-                    string fileName = Path.GetFileName(fileUrl);
-                    string destFile = Path.Combine(installDir, fileName);
+                    string fileName = System.IO.Path.GetFileName(fileUrl);
+                    string destFile = System.IO.Path.Combine(installDir, fileName);
 
                     using var response = await httpClient.GetAsync(fileUrl, HttpCompletionOption.ResponseHeadersRead, token);
                     response.EnsureSuccessStatusCode();
@@ -96,13 +108,46 @@ namespace WpfInstaller
                     }
                 }
 
-                // --- finalize ---
-                string exePath = Path.Combine(installDir, "WpfApp1.exe");
-                string renamedExe = Path.Combine(installDir, "browser.exe");
+                // rename exe
+                string exePath = System.IO.Path.Combine(installDir, "WpfApp1.exe");
+                string renamedExe = System.IO.Path.Combine(installDir, "browser.exe");
                 if (System.IO.File.Exists(renamedExe)) System.IO.File.Delete(renamedExe);
                 System.IO.File.Move(exePath, renamedExe);
 
                 CreateDesktopShortcut(renamedExe);
+
+                // --- handle addons ---
+                if (AllowAddonsCheckbox.IsChecked == true && !string.IsNullOrWhiteSpace(AddonCodeBox.Text))
+                {
+                    string modsDir = System.IO.Path.Combine(installDir, "mods");
+                    Directory.CreateDirectory(modsDir);
+
+                    string codeOrLink = AddonCodeBox.Text.Trim();
+
+                    // resolve code to URL from Codes.json
+                    string codesJsonPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Codes.json");
+                    string addonUrl = codeOrLink;
+
+                    if (System.IO.File.Exists(codesJsonPath))
+                    {
+                        var json = JsonDocument.Parse(System.IO.File.ReadAllText(codesJsonPath));
+                        if (json.RootElement.TryGetProperty(codeOrLink, out var urlElem))
+                            addonUrl = urlElem.GetString() ?? codeOrLink;
+                    }
+
+                    string addonName = System.IO.Path.GetFileNameWithoutExtension(addonUrl);
+                    string addonFolder = System.IO.Path.Combine(modsDir, addonName);
+                    Directory.CreateDirectory(addonFolder);
+
+                    string dllPath = System.IO.Path.Combine(addonFolder, System.IO.Path.GetFileName(addonUrl));
+                    var bytes = await httpClient.GetByteArrayAsync(addonUrl);
+                    await System.IO.File.WriteAllBytesAsync(dllPath, bytes);
+
+                    // write mod.json
+                    var modConfig = new { Disabled = false };
+                    string configJson = JsonSerializer.Serialize(modConfig, new JsonSerializerOptions { WriteIndented = true });
+                    System.IO.File.WriteAllText(System.IO.Path.Combine(addonFolder, "mod.json"), configJson);
+                }
 
                 InstallProgress.Value = 100;
                 InstallStatusLabel.Content = "Installation complete!";
@@ -133,13 +178,13 @@ namespace WpfInstaller
         private void CreateDesktopShortcut(string targetPath)
         {
             string desk = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-            string shortcutPath = Path.Combine(desk, "browser.lnk");
+            string shortcutPath = System.IO.Path.Combine(desk, "browser.lnk");
 
             var shell = new WshShell();
             IWshShortcut shortcut = (IWshShortcut)shell.CreateShortcut(shortcutPath);
             shortcut.Description = "Browser app";
             shortcut.TargetPath = targetPath;
-            shortcut.WorkingDirectory = Path.GetDirectoryName(targetPath)!;
+            shortcut.WorkingDirectory = System.IO.Path.GetDirectoryName(targetPath)!;
             shortcut.IconLocation = targetPath + ",0";
             shortcut.Save();
         }
