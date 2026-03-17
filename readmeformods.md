@@ -30,17 +30,17 @@ public class MyMod : IBrowserMod
 {
     public void OnLoad(AppAPI api)
     {
-        // Example: edit XAML
-        api.EditXaml("MainWindow.xaml", "<Window x:Class=\"CustomBrowserWPF.MainWindow\"> ... </Window>");
+        // literally one line to patch any file
+        api.Edit("MainWindow.xaml", "<Window x:Class=\"CustomBrowserWPF.MainWindow\"> ... </Window>");
 
-        // Example: edit code-behind
-        api.EditCodeBehind("MainWindow.xaml.cs", "using System; ... full code ...");
+        // you can also edit code-behind
+        api.Edit("MainWindow.xaml.cs", "// new code here");
 
-        // Example: live GUI manipulation (optional)
+        // access GUI if loader has started it
         if (api.GuiInstance != null)
         {
-            dynamic gui = api.GuiInstance;
-            gui.CreateNewTab("https://www.google.com");
+            var mw = (CustomBrowserWPF.MainWindow)api.GuiInstance;
+            // do stuff with the window
         }
     }
 }
