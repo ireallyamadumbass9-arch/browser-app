@@ -1,106 +1,30 @@
+﻿using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.Wpf;
 using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Reflection;
-using System.Text.Json;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
-using Microsoft.Web.WebView2.Core;
-using Microsoft.Web.WebView2.Wpf;
-using System.Threading;
-using System.Threading.Tasks;
-using System.Net.Http;
-using System.Web;
 
 namespace CustomBrowserWPF
 {
-    public class HistoryItem
-    {
-        public string Url { get; set; } = "";
-        public string Title { get; set; } = "";
-        public DateTime Date { get; set; }
-    }
-
-    public class SettingsData
-    {
-        public string DownloadFolder { get; set; } = "";
-        public string ImportBrowser { get; set; } = "edge";
-    }
-
     public partial class MainWindow : Window
     {
-        private string saveFolder;
-        private string historyFile;
-        private string settingsFile;
-        private SettingsData settings = new SettingsData();
-        private List<HistoryItem> browserHistory = new List<HistoryItem>();
-        private List<string> suggestions = new List<string>();
-        private bool isUpdatingAddressBar = false;
-        private bool isUserTyping = false;
-
-        private List<string> defaultSuggestions = new List<string>
-        {
-            "youtube", "facebook", "twitter", "gmail", "wikipedia", "amazon", "reddit", "instagram", "netflix"
-        };
-
-        private CancellationTokenSource suggestionCts = new CancellationTokenSource();
-
-        // fullscreen/maximized
         private bool isFullscreen = false;
+        private bool isUpdatingAddressBar = false;
         private Rect restoreBounds;
 
         public MainWindow()
         {
             InitializeComponent();
 
-            saveFolder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "saves");
-            Directory.CreateDirectory(saveFolder);
-
-            historyFile = Path.Combine(saveFolder, "history.json");
-            settingsFile = Path.Combine(saveFolder, "settings.json");
-
-            LoadOrCreateSettings();
-
+            // create first tab
             CreateNewTab("https://www.google.com");
 
             this.KeyDown += MainWindow_KeyDown;
 
             AddressBar.PreviewMouseLeftButtonDown += (s, e) => AddressBar.SelectAll();
-            AddressBar.PreviewTextInput += (s, e) => { isUserTyping = true; };
-            AddressBar.PreviewKeyDown += AddressBar_KeyDown;
-            AddressBar.TextChanged += AddressBar_TextChanged;
-
-            // --- load mods after UI initialized ---
-            _ = LoadMods();
-        }
-
-        private void LoadOrCreateSettings()
-        {
-            if (!File.Exists(settingsFile))
-            {
-                settings = new SettingsData
-                {
-                    DownloadFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Downloads"),
-                    ImportBrowser = "edge"
-                };
-                SaveSettings();
-            }
-            else
-            {
-                try
-                {
-                    string json = File.ReadAllText(settingsFile);
-                    settings = JsonSerializer.Deserialize<SettingsData>(json) ?? new SettingsData();
-                }
-                catch { settings = new SettingsData(); }
-            }
-        }
-
-        private void SaveSettings()
-        {
-            File.WriteAllText(settingsFile, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
         }
 
         private void MainWindow_KeyDown(object sender, KeyEventArgs e)
@@ -140,9 +64,29 @@ namespace CustomBrowserWPF
             headerGrid.ColumnDefinitions.Add(new ColumnDefinition() { Width = GridLength.Auto });
             headerGrid.ColumnDefinitions.Add(new ColumnDefinition() { Width = GridLength.Auto });
 
-            Image favicon = new Image { Width = 16, Height = 16, Margin = new Thickness(2, 0, 5, 0), VerticalAlignment = VerticalAlignment.Center };
-            TextBlock titleBlock = new TextBlock { Text = "New Tab", VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 0, 5, 0) };
-            Button closeButton = new Button { Content = "X", Width = 20, Height = 20, Margin = new Thickness(5, 0, 5, 0) };
+            Image favicon = new Image
+            {
+                Width = 16,
+                Height = 16,
+                Margin = new Thickness(2, 0, 5, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            TextBlock titleBlock = new TextBlock
+            {
+                Text = "New Tab",
+                VerticalAlignment = VerticalAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                Margin = new Thickness(0, 0, 5, 0)
+            };
+
+            Button closeButton = new Button
+            {
+                Content = "X",
+                Width = 20,
+                Height = 20,
+                Margin = new Thickness(5, 0, 5, 0)
+            };
 
             Grid.SetColumn(favicon, 0);
             Grid.SetColumn(titleBlock, 1);
@@ -160,15 +104,21 @@ namespace CustomBrowserWPF
 
             closeButton.Click += (s, e) =>
             {
-                if (BrowserTabs.Items.Count > 1)
+                if (BrowserTabs.Items.Contains(tab))
+                {
+                    if (tab.Content is WebView2 wv)
+                    {
+                        wv.CoreWebView2?.Stop();
+                        wv.Dispose();
+                    }
+
                     BrowserTabs.Items.Remove(tab);
-                else
-                    this.Close();
+                }
             };
 
             BrowserTabs.SelectionChanged += (s, e) => UpdateTabXButtons();
 
-            _ = InitializeWebView(webview, url, favicon, titleBlock, tab);
+            _ = InitializeWebView(webview, url, favicon, titleBlock);
         }
 
         private void UpdateTabXButtons()
@@ -180,13 +130,19 @@ namespace CustomBrowserWPF
             }
         }
 
-        private async Task InitializeWebView(WebView2 webview, string url, Image favicon, TextBlock titleBlock, TabItem tab)
+        private async Task InitializeWebView(WebView2 webview, string url, Image favicon, TextBlock titleBlock)
         {
-            var env = await CoreWebView2Environment.CreateAsync(null, Path.Combine(saveFolder, "webview2userdata"));
+            // FORCE all WebView2 data to go in saves/webview2userdata
+            var env = await Saves.CreateWebView2EnvironmentAsync();
             await webview.EnsureCoreWebView2Async(env);
 
             webview.CoreWebView2.Settings.AreDevToolsEnabled = true;
             webview.CoreWebView2.Settings.IsZoomControlEnabled = true;
+
+            webview.CoreWebView2.NavigationStarting += (s, e) =>
+            {
+                titleBlock.Text = "Loading...";
+            };
 
             void UpdateTabHeader()
             {
@@ -196,60 +152,68 @@ namespace CustomBrowserWPF
 
                     isUpdatingAddressBar = true;
                     AddressBar.Text = currentUrl;
-                    AddressPlaceholder.Visibility = string.IsNullOrEmpty(AddressBar.Text) && isUserTyping ? Visibility.Visible : Visibility.Collapsed;
                     isUpdatingAddressBar = false;
 
+                    AddressPlaceholder.Visibility =
+                        string.IsNullOrEmpty(AddressBar.Text) ? Visibility.Visible : Visibility.Collapsed;
+
                     string title = webview.CoreWebView2.DocumentTitle;
-                    titleBlock.Text = title.Length > 25 ? title.Substring(0, 22) + "..." : title;
+                    titleBlock.Text =
+                        title.Length > 25 ? title.Substring(0, 22) + "..." : title;
 
                     Uri uri = new Uri(currentUrl);
                     favicon.Source = new BitmapImage(new Uri($"{uri.Scheme}://{uri.Host}/favicon.ico"));
-
-                    if (!suggestions.Contains(currentUrl))
-                        suggestions.Add(currentUrl);
                 }
                 catch { }
             }
 
-            webview.CoreWebView2.NavigationStarting += (s, e) => { titleBlock.Text = "Loading..."; };
-            webview.CoreWebView2.NavigationCompleted += (s, e) => UpdateTabHeader();
+            webview.CoreWebView2.NavigationCompleted += (s, e) =>
+            {
+                UpdateTabHeader();
+
+                // LOG HISTORY using Saves.cs (all data stays in saves folder)
+                try
+                {
+                    string currentUrl = webview.Source?.AbsoluteUri ?? webview.CoreWebView2.Source;
+                    string title = webview.CoreWebView2.DocumentTitle ?? "";
+                    Saves.AddHistory(currentUrl, title);
+                }
+                catch { }
+            };
+
             webview.CoreWebView2.SourceChanged += (s, e) => UpdateTabHeader();
             webview.CoreWebView2.HistoryChanged += (s, e) => UpdateTabHeader();
             webview.CoreWebView2.DocumentTitleChanged += (s, e) => UpdateTabHeader();
 
+            // fullscreen support
             webview.CoreWebView2.ContainsFullScreenElementChanged += (s, e) =>
             {
                 if (webview.CoreWebView2.ContainsFullScreenElement)
                 {
-                    if (!isFullscreen)
-                    {
-                        TopBar.Visibility = Visibility.Collapsed;
-                        WindowState = WindowState.Maximized;
-                        isFullscreen = true;
-                    }
+                    TopBar.Visibility = Visibility.Collapsed;
+                    WindowState = WindowState.Maximized;
+                    isFullscreen = true;
                 }
                 else
                 {
-                    if (isFullscreen)
-                    {
-                        TopBar.Visibility = Visibility.Visible;
-                        WindowState = WindowState.Normal;
-                        this.Left = restoreBounds.Left;
-                        this.Top = restoreBounds.Top;
-                        this.Width = restoreBounds.Width;
-                        this.Height = restoreBounds.Height;
-                        isFullscreen = false;
-                    }
+                    TopBar.Visibility = Visibility.Visible;
+                    WindowState = WindowState.Normal;
+                    this.Left = restoreBounds.Left;
+                    this.Top = restoreBounds.Top;
+                    this.Width = restoreBounds.Width;
+                    this.Height = restoreBounds.Height;
+                    isFullscreen = false;
                 }
             };
 
             webview.CoreWebView2.Navigate(url);
         }
 
-        private WebView2? GetCurrentWebView()
+        public WebView2? GetCurrentWebView()
         {
             if (BrowserTabs.SelectedItem is TabItem tab && tab.Content is WebView2 webview)
                 return webview;
+
             return null;
         }
 
@@ -261,206 +225,122 @@ namespace CustomBrowserWPF
             string input = AddressBar.Text.Trim();
             if (string.IsNullOrEmpty(input)) return;
 
-            string url = input.Contains(".") || input.StartsWith("http") ? (input.StartsWith("http") ? input : "https://" + input) : "https://www.google.com/search?q=" + Uri.EscapeDataString(input);
+            string url;
+
+            if (input.StartsWith("http://") || input.StartsWith("https://") || input.Contains("."))
+                url = input.StartsWith("http") ? input : "https://" + input;
+            else
+                url = "https://www.google.com/search?q=" + Uri.EscapeDataString(input);
+
             webview.CoreWebView2.Navigate(url);
 
-            isUserTyping = false;
-        }
-
-        private void GoButton_Click(object sender, RoutedEventArgs e) => Navigate();
-        private void NewTab_Click(object sender, RoutedEventArgs e) => CreateNewTab("https://www.google.com");
-        private void BackButton_Click(object sender, RoutedEventArgs e) => GetCurrentWebView()?.CoreWebView2.GoBack();
-        private void ForwardButton_Click(object sender, RoutedEventArgs e) => GetCurrentWebView()?.CoreWebView2.GoForward();
-        private void ReloadButton_Click(object sender, RoutedEventArgs e) => GetCurrentWebView()?.CoreWebView2.Reload();
-
-        private async void AddressBar_TextChanged(object sender, TextChangedEventArgs e)
-        {
-            if (isUpdatingAddressBar || !isUserTyping) return;
-
-            AddressPlaceholder.Visibility = string.IsNullOrEmpty(AddressBar.Text) && isUserTyping
-                ? Visibility.Visible
-                : Visibility.Collapsed;
-
-            string input = AddressBar.Text.Trim();
-            suggestionCts?.Cancel();
-            suggestionCts = new CancellationTokenSource();
-            var token = suggestionCts.Token;
-
-            if (string.IsNullOrEmpty(input))
-            {
-                SuggestionPopup.IsOpen = false;
-                return;
-            }
-
-            try
-            {
-                await Task.Delay(200, token); // debounce
-                var liveSuggestions = await GetGoogleSuggestions(input);
-
-                var combined = new List<string>();
-
-                foreach (var h in suggestions)
-                {
-                    if (h.ToLower().Contains(input.ToLower()))
-                    {
-                        string suggestionText = h;
-                        if (h.Contains("google.com/search") && h.Contains("q="))
-                        {
-                            try
-                            {
-                                var uri = new Uri(h);
-                                var query = HttpUtility.ParseQueryString(uri.Query).Get("q");
-                                if (!string.IsNullOrEmpty(query))
-                                    suggestionText = query;
-                            }
-                            catch { }
-                        }
-                        if (!combined.Contains(suggestionText))
-                            combined.Add(suggestionText);
-                    }
-                }
-
-                foreach (var s in liveSuggestions)
-                {
-                    if (!combined.Contains(s))
-                        combined.Add(s);
-                }
-
-                if (combined.Count == 0)
-                    combined.AddRange(defaultSuggestions);
-
-                SuggestionList.Items.Clear();
-                foreach (var s in combined)
-                    SuggestionList.Items.Add(s);
-
-                SuggestionPopup.IsOpen = SuggestionList.Items.Count > 0;
-            }
-            catch (OperationCanceledException) { }
-        }
-
-        private async Task<List<string>> GetGoogleSuggestions(string query)
-        {
-            try
-            {
-                using var client = new HttpClient();
-                string url = $"https://suggestqueries.google.com/complete/search?client=firefox&q={Uri.EscapeDataString(query)}";
-                var response = await client.GetStringAsync(url);
-                var suggestions = JsonSerializer.Deserialize<List<object>>(response) ?? new List<object>();
-                if (suggestions.Count >= 2 && suggestions[1] is JsonElement arr && arr.ValueKind == JsonValueKind.Array)
-                {
-                    var list = new List<string>();
-                    foreach (var item in arr.EnumerateArray())
-                        list.Add(item.GetString() ?? "");
-                    return list;
-                }
-            }
-            catch { }
-            return new List<string>();
+            SuggestionPopup.IsOpen = false;
         }
 
         private void AddressBar_KeyDown(object sender, KeyEventArgs e)
         {
-            if ((e.Key == Key.Enter || e.Key == Key.Tab) && SuggestionList.Items.Count > 0)
+            if (e.Key == Key.Enter)
+                Navigate();
+        }
+
+        private async void AddressBar_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (isUpdatingAddressBar)
+                return;
+
+            string query = AddressBar.Text.Trim();
+
+            AddressPlaceholder.Visibility =
+                string.IsNullOrWhiteSpace(query)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+
+            if (string.IsNullOrWhiteSpace(query))
             {
-                if (SuggestionList.Items[0] is string first)
-                {
-                    isUpdatingAddressBar = true;
-                    AddressBar.Text = first;
-                    AddressBar.CaretIndex = first.Length;
-                    isUpdatingAddressBar = false;
-
-                    if (e.Key == Key.Enter) Navigate();
-                }
-
-                e.Handled = true;
                 SuggestionPopup.IsOpen = false;
+                return;
             }
 
-            if (e.Key == Key.Back || e.Key == Key.Delete)
-                isUserTyping = true;
-            else
-                isUserTyping = false;
+            await LoadGoogleSuggestions(query);
+        }
+
+        private async Task LoadGoogleSuggestions(string query)
+        {
+            try
+            {
+                using var client = new System.Net.Http.HttpClient();
+
+                string url =
+                    "https://suggestqueries.google.com/complete/search?client=firefox&q=" +
+                    Uri.EscapeDataString(query);
+
+                string json = await client.GetStringAsync(url);
+
+                var data = System.Text.Json.JsonSerializer.Deserialize<object[]>(json);
+
+                if (data == null || data.Length < 2)
+                    return;
+
+                var suggestions =
+                    System.Text.Json.JsonSerializer.Deserialize<string[]>(data[1].ToString());
+
+                SuggestionList.Items.Clear();
+
+                if (suggestions != null)
+                {
+                    foreach (var s in suggestions)
+                        SuggestionList.Items.Add(s);
+                }
+
+                SuggestionPopup.IsOpen = SuggestionList.Items.Count > 0;
+            }
+            catch
+            {
+                SuggestionPopup.IsOpen = false;
+            }
         }
 
         private void Suggestion_Click(object sender, MouseButtonEventArgs e)
         {
-            if (SuggestionList.SelectedItem is string selected)
-            {
-                isUpdatingAddressBar = true;
-                AddressBar.Text = selected;
-                AddressBar.CaretIndex = selected.Length;
-                isUpdatingAddressBar = false;
-                Navigate();
-            }
+            if (SuggestionList.SelectedItem == null)
+                return;
+
+            string selected = SuggestionList.SelectedItem.ToString();
+
+            AddressBar.Text = selected;
+            SuggestionPopup.IsOpen = false;
+
+            Navigate();
         }
 
         private void SettingsButton_Click(object sender, RoutedEventArgs e)
         {
-            string settingsPath = Path.Combine(saveFolder, "settings.html");
-            if (!File.Exists(settingsPath))
-            {
-                File.WriteAllText(settingsPath, "<!DOCTYPE html><html><body><h1>Settings</h1></body></html>");
-            }
-            CreateNewTab(settingsPath);
+            MessageBox.Show("Settings not implemented yet");
         }
 
-        // ---------- MOD LOADER ----------
-        private async Task LoadMods()
+        private void GoButton_Click(object sender, RoutedEventArgs e)
         {
-            string modsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "mods");
-            if (!Directory.Exists(modsDir))
-                return;
+            Navigate();
+        }
 
-            var modFolders = Directory.GetDirectories(modsDir);
-            var failedMods = new List<string>();
-            var loadedMods = new List<string>();
+        private void NewTab_Click(object sender, RoutedEventArgs e)
+        {
+            CreateNewTab("https://www.google.com");
+        }
 
-            foreach (var folder in modFolders)
-            {
-                try
-                {
-                    string configPath = Path.Combine(folder, "mod.json");
-                    bool disabled = false;
+        private void BackButton_Click(object sender, RoutedEventArgs e)
+        {
+            GetCurrentWebView()?.CoreWebView2.GoBack();
+        }
 
-                    if (File.Exists(configPath))
-                    {
-                        string json = File.ReadAllText(configPath);
-                        var doc = JsonDocument.Parse(json);
-                        if (doc.RootElement.TryGetProperty("Disabled", out var prop))
-                            disabled = prop.GetBoolean();
-                    }
+        private void ForwardButton_Click(object sender, RoutedEventArgs e)
+        {
+            GetCurrentWebView()?.CoreWebView2.GoForward();
+        }
 
-                    if (disabled)
-                        continue;
-
-                    var dlls = Directory.GetFiles(folder, "*.dll");
-                    if (dlls.Length == 0)
-                    {
-                        failedMods.Add(System.IO.Path.GetFileName(folder));
-                        continue;
-                    }
-
-                    string dllPath = dlls[0];
-                    Assembly.LoadFrom(dllPath);
-                    loadedMods.Add(System.IO.Path.GetFileName(folder));
-                }
-                catch
-                {
-                    failedMods.Add(System.IO.Path.GetFileName(folder));
-                }
-            }
-
-            string message = "Mods loaded:\n";
-            if (loadedMods.Count > 0)
-                message += string.Join("\n", loadedMods);
-            else
-                message += "None";
-
-            if (failedMods.Count > 0)
-                message += "\n\nFailed to load:\n" + string.Join("\n", failedMods);
-
-            await Task.Delay(100);
-            MessageBox.Show(message, "Mod Loader", MessageBoxButton.OK, MessageBoxImage.Information);
+        private void ReloadButton_Click(object sender, RoutedEventArgs e)
+        {
+            GetCurrentWebView()?.CoreWebView2.Reload();
         }
     }
 }

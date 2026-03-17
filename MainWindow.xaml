@@ -3,10 +3,11 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         Title="f1ldas's browser" Height="800" Width="1200" MinHeight="600" MinWidth="800">
+
     <DockPanel>
 
         <!-- Top Bar -->
-        <Grid x:Name="TopBar" DockPanel.Dock="Top" Height="40" Background="#f0f0f0">
+        <Grid x:Name="TopBar" x:FieldModifier="public" DockPanel.Dock="Top" Height="40" Background="#f0f0f0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto"/>
@@ -16,42 +17,40 @@
             <Grid VerticalAlignment="Center" Margin="5,0,0,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
-                    <!-- buttons -->
                     <ColumnDefinition Width="*"/>
-                    <!-- address bar stretches -->
                 </Grid.ColumnDefinitions>
 
                 <!-- Buttons -->
                 <StackPanel Orientation="Horizontal" Grid.Column="0">
-                    <Button Content="+" Width="40" Click="NewTab_Click"/>
-                    <Button Content="◀" Width="40" Click="BackButton_Click"/>
-                    <Button Content="▶" Width="40" Click="ForwardButton_Click"/>
-                    <Button Content="⟳" Width="40" Click="ReloadButton_Click"/>
+                    <Button x:Name="NewTabButton" x:FieldModifier="public" Content="+" Width="40" Click="NewTab_Click"/>
+                    <Button x:Name="BackButton" x:FieldModifier="public" Content="◀" Width="40" Click="BackButton_Click"/>
+                    <Button x:Name="ForwardButton" x:FieldModifier="public" Content="▶" Width="40" Click="ForwardButton_Click"/>
+                    <Button x:Name="ReloadButton" x:FieldModifier="public" Content="⟳" Width="40" Click="ReloadButton_Click"/>
                 </StackPanel>
 
                 <!-- Address Bar -->
                 <Grid Grid.Column="1" HorizontalAlignment="Stretch" Margin="5,0,0,0">
-                    <TextBox x:Name="AddressBar"
-             VerticalAlignment="Center"
-             VerticalContentAlignment="Center"
-             Height="24"
-             Padding="5,0"
-             KeyDown="AddressBar_KeyDown"
-             TextChanged="AddressBar_TextChanged"/>
-                    <TextBlock x:Name="AddressPlaceholder"
-               Text="Search or enter address"
-               Foreground="Gray"
-               Margin="6,0,0,0"
-               VerticalAlignment="Center"
-               IsHitTestVisible="False"/>
-                    <Popup x:Name="SuggestionPopup"
-           Placement="Bottom"
-           PlacementTarget="{Binding ElementName=AddressBar}"
-           StaysOpen="False">
+                    <TextBox x:Name="AddressBar" x:FieldModifier="public"
+                             VerticalAlignment="Center"
+                             VerticalContentAlignment="Center"
+                             Height="24"
+                             Padding="5,0"
+                             KeyDown="AddressBar_KeyDown"
+                             TextChanged="AddressBar_TextChanged"/>
+                    <TextBlock x:Name="AddressPlaceholder" x:FieldModifier="public"
+                               Text="Search or enter address"
+                               Foreground="Gray"
+                               Margin="6,0,0,0"
+                               VerticalAlignment="Center"
+                               IsHitTestVisible="False"/>
+                    <Popup x:Name="SuggestionPopup" x:FieldModifier="public"
+                           Placement="Bottom"
+                           PlacementTarget="{Binding ElementName=AddressBar}"
+                           StaysOpen="False">
                         <Border Background="White" BorderBrush="Gray" BorderThickness="1">
-                            <ListBox x:Name="SuggestionList"
-                     Width="Auto"
-                     MouseDoubleClick="Suggestion_Click"/>
+                            <ListBox x:Name="SuggestionList" x:FieldModifier="public"
+                                     Width="Auto"
+                                     MouseDoubleClick="Suggestion_Click"/>
                         </Border>
                     </Popup>
                 </Grid>
@@ -59,12 +58,17 @@
 
             <!-- Right Buttons -->
             <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,5,0">
-                <Button Content="Go" Width="60" Click="GoButton_Click" Margin="5,0,0,0"/>
-                <Button Content="⚙ Settings" Width="80" Click="SettingsButton_Click" Margin="5,0,0,0"/>
+                <Button x:Name="GoButton" x:FieldModifier="public" Content="Go" Width="60" Click="GoButton_Click" Margin="5,0,0,0"/>
+
+                <!-- Settings button still present but invisible and non-clickable -->
+                <Button x:Name="SettingsButton" x:FieldModifier="public"
+                        Content="⚙ Settings" Width="80"
+                        IsEnabled="False" Visibility="Collapsed"
+                        Margin="5,0,0,0"/>
             </StackPanel>
         </Grid>
 
         <!-- Tab Control -->
-        <TabControl x:Name="BrowserTabs" Margin="0" Background="White"/>
+        <TabControl x:Name="BrowserTabs" x:FieldModifier="public" Margin="0" Background="White"/>
     </DockPanel>
 </Window>
