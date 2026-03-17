@@ -5,27 +5,21 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using Microsoft.Win32;
-using IWshRuntimeLibrary;
+using System.IO.Compression;
 using System.Text.Json;
+
+// alias to fix File conflict
+using IOFile = System.IO.File;
 
 namespace WpfInstaller
 {
     public partial class MainWindow : Window
     {
         private string defaultInstall = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "BrowserApp");
+
         private readonly string[] filesToDownload = new string[]
         {
-            "https://github.com/ireallyamadumbass9-arch/stuff/raw/main/WpfApp1.exe",
-            "https://github.com/ireallyamadumbass9-arch/stuff/raw/refs/heads/main/Microsoft.Web.WebView2.Core.dll",
-            "https://raw.githubusercontent.com/ireallyamadumbass9-arch/stuff/refs/heads/main/Microsoft.Web.WebView2.Core.xml",
-            "https://raw.githubusercontent.com/ireallyamadumbass9-arch/stuff/refs/heads/main/Microsoft.Web.WebView2.WinForms.dll",
-            "https://github.com/ireallyamadumbass9-arch/stuff/raw/refs/heads/main/Microsoft.Web.WebView2.Wpf.dll",
-            "https://raw.githubusercontent.com/ireallyamadumbass9-arch/stuff/refs/heads/main/Microsoft.Web.WebView2.Wpf.xml",
-            "https://github.com/ireallyamadumbass9-arch/stuff/raw/refs/heads/main/WebView2Loader.dll",
-            "https://github.com/ireallyamadumbass9-arch/stuff/raw/refs/heads/main/WpfApp1.deps.json",
-            "https://github.com/ireallyamadumbass9-arch/stuff/raw/refs/heads/main/WpfApp1.dll",
-            "https://github.com/ireallyamadumbass9-arch/stuff/raw/refs/heads/main/WpfApp1.pdb",
-            "https://raw.githubusercontent.com/ireallyamadumbass9-arch/stuff/refs/heads/main/WpfApp1.runtimeconfig.json"
+            "https://github.com/ireallyamadumbass9-arch/stuff/releases/download/y/installer.zip"
         };
 
         private CancellationTokenSource? cts = null;
@@ -33,20 +27,29 @@ namespace WpfInstaller
         public MainWindow()
         {
             InitializeComponent();
+
             InstallPathBox.Text = defaultInstall;
-            AddonCodeBox.IsEnabled = false; // disabled by default
+            AddonCodeBox.IsEnabled = false;
 
             if (Directory.Exists(defaultInstall) && Directory.GetFiles(defaultInstall).Length > 0)
                 InstallButton.Content = "Update";
         }
 
+        // ===== BROWSE =====
         private void Browse_Click(object sender, RoutedEventArgs e)
         {
-            var dlg = new OpenFileDialog { CheckFileExists = false, CheckPathExists = true, FileName = "Select folder" };
+            var dlg = new OpenFileDialog
+            {
+                CheckFileExists = false,
+                CheckPathExists = true,
+                FileName = "Select folder"
+            };
+
             if (dlg.ShowDialog() == true)
-                InstallPathBox.Text = System.IO.Path.GetDirectoryName(dlg.FileName)!;
+                InstallPathBox.Text = Path.GetDirectoryName(dlg.FileName)!;
         }
 
+        // ===== ADDONS =====
         private void AllowAddons_Checked(object sender, RoutedEventArgs e)
         {
             AddonCodeBox.IsEnabled = true;
@@ -57,10 +60,12 @@ namespace WpfInstaller
             AddonCodeBox.IsEnabled = false;
         }
 
+        // ===== INSTALL =====
         private async void Install_Click(object sender, RoutedEventArgs e)
         {
             InstallButton.IsEnabled = false;
             CancelButton.IsEnabled = true;
+
             cts = new CancellationTokenSource();
             var token = cts.Token;
 
@@ -68,96 +73,145 @@ namespace WpfInstaller
             Directory.CreateDirectory(installDir);
 
             InstallProgress.Value = 0;
-            int totalFiles = filesToDownload.Length;
-            int currentFileIndex = 0;
 
             try
             {
                 using var httpClient = new HttpClient();
 
-                foreach (string fileUrl in filesToDownload)
+                string fileUrl = filesToDownload[0];
+                string zipPath = Path.Combine(installDir, "installer.zip");
+
+                // ===== DOWNLOAD =====
+                using var response = await httpClient.GetAsync(fileUrl, HttpCompletionOption.ResponseHeadersRead, token);
+                response.EnsureSuccessStatusCode();
+
+                long totalBytes = response.Content.Headers.ContentLength ?? -1L;
+
+                using var stream = await response.Content.ReadAsStreamAsync(token);
+                using var fs = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.None);
+
+                var buffer = new byte[81920];
+                long totalRead = 0;
+                int read;
+
+                while ((read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), token)) > 0)
                 {
-                    currentFileIndex++;
-                    string fileName = System.IO.Path.GetFileName(fileUrl);
-                    string destFile = System.IO.Path.Combine(installDir, fileName);
+                    await fs.WriteAsync(buffer.AsMemory(0, read), token);
+                    totalRead += read;
 
-                    using var response = await httpClient.GetAsync(fileUrl, HttpCompletionOption.ResponseHeadersRead, token);
-                    response.EnsureSuccessStatusCode();
-                    long totalBytes = response.Content.Headers.ContentLength ?? -1L;
-
-                    using var stream = await response.Content.ReadAsStreamAsync(token);
-                    using var fs = new FileStream(destFile, FileMode.Create, FileAccess.Write, FileShare.None);
-
-                    var buffer = new byte[81920];
-                    long totalRead = 0;
-                    int read;
-                    while ((read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), token)) > 0)
+                    if (totalBytes > 0)
                     {
-                        await fs.WriteAsync(buffer.AsMemory(0, read), token);
-                        totalRead += read;
+                        double percent = (double)totalRead / totalBytes * 50;
+                        InstallProgress.Value = percent;
+                        InstallStatusLabel.Content = $"Downloading... {(percent * 2):F1}%";
+                    }
 
-                        if (totalBytes > 0)
-                        {
-                            double percent = ((currentFileIndex - 1 + (double)totalRead / totalBytes) / totalFiles) * 100;
-                            InstallProgress.Value = percent;
-                            InstallStatusLabel.Content = $"Downloading {fileName} ({currentFileIndex}/{totalFiles}) - {((double)totalRead / totalBytes * 100):F1}%";
-                        }
+                    if (token.IsCancellationRequested)
+                        throw new OperationCanceledException();
+                }
 
+                // ===== EXTRACT =====
+                string extractPath = Path.Combine(installDir, "temp_extract");
+
+                if (Directory.Exists(extractPath))
+                    Directory.Delete(extractPath, true);
+
+                Directory.CreateDirectory(extractPath);
+
+                using (var archive = ZipFile.OpenRead(zipPath))
+                {
+                    int totalEntries = archive.Entries.Count;
+                    int current = 0;
+
+                    foreach (var entry in archive.Entries)
+                    {
                         if (token.IsCancellationRequested)
                             throw new OperationCanceledException();
+
+                        string fullPath = Path.Combine(extractPath, entry.FullName);
+
+                        if (string.IsNullOrEmpty(entry.Name))
+                        {
+                            Directory.CreateDirectory(fullPath);
+                        }
+                        else
+                        {
+                            string? dir = Path.GetDirectoryName(fullPath);
+                            if (dir == null)
+                                throw new Exception("Invalid path during extraction");
+
+                            Directory.CreateDirectory(dir);
+                            entry.ExtractToFile(fullPath, true);
+                        }
+
+                        current++;
+
+                        double percent = 50 + ((double)current / totalEntries * 40);
+                        InstallProgress.Value = percent;
+                        InstallStatusLabel.Content = $"Extracting... {percent:F1}%";
                     }
                 }
 
-                // rename exe
-                string exePath = System.IO.Path.Combine(installDir, "WpfApp1.exe");
-                string renamedExe = System.IO.Path.Combine(installDir, "browser.exe");
-                if (System.IO.File.Exists(renamedExe)) System.IO.File.Delete(renamedExe);
-                System.IO.File.Move(exePath, renamedExe);
+                IOFile.Delete(zipPath);
 
-                CreateDesktopShortcut(renamedExe);
+                // ===== MOVE FILES =====
+                string installerFolder = Path.Combine(extractPath, "installer");
 
-                // --- handle addons ---
-                if (AllowAddonsCheckbox.IsChecked == true && !string.IsNullOrWhiteSpace(AddonCodeBox.Text))
+                if (!Directory.Exists(installerFolder))
+                    throw new Exception("installer folder not found in zip");
+
+                foreach (var dir in Directory.GetDirectories(installerFolder))
                 {
-                    string modsDir = System.IO.Path.Combine(installDir, "mods");
-                    Directory.CreateDirectory(modsDir);
-
-                    string codeOrLink = AddonCodeBox.Text.Trim();
-
-                    // resolve code to URL from Codes.json
-                    string codesJsonPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Codes.json");
-                    string addonUrl = codeOrLink;
-
-                    if (System.IO.File.Exists(codesJsonPath))
-                    {
-                        var json = JsonDocument.Parse(System.IO.File.ReadAllText(codesJsonPath));
-                        if (json.RootElement.TryGetProperty(codeOrLink, out var urlElem))
-                            addonUrl = urlElem.GetString() ?? codeOrLink;
-                    }
-
-                    string addonName = System.IO.Path.GetFileNameWithoutExtension(addonUrl);
-                    string addonFolder = System.IO.Path.Combine(modsDir, addonName);
-                    Directory.CreateDirectory(addonFolder);
-
-                    string dllPath = System.IO.Path.Combine(addonFolder, System.IO.Path.GetFileName(addonUrl));
-                    var bytes = await httpClient.GetByteArrayAsync(addonUrl);
-                    await System.IO.File.WriteAllBytesAsync(dllPath, bytes);
-
-                    // write mod.json
-                    var modConfig = new { Disabled = false };
-                    string configJson = JsonSerializer.Serialize(modConfig, new JsonSerializerOptions { WriteIndented = true });
-                    System.IO.File.WriteAllText(System.IO.Path.Combine(addonFolder, "mod.json"), configJson);
+                    string dest = Path.Combine(installDir, Path.GetFileName(dir));
+                    if (Directory.Exists(dest)) Directory.Delete(dest, true);
+                    Directory.Move(dir, dest);
                 }
+
+                foreach (var file in Directory.GetFiles(installerFolder))
+                {
+                    string dest = Path.Combine(installDir, Path.GetFileName(file));
+                    if (IOFile.Exists(dest)) IOFile.Delete(dest);
+                    IOFile.Move(file, dest);
+                }
+
+                Directory.Delete(extractPath, true);
+
+                // ===== RENAME EXE =====
+                string oldExe = Path.Combine(installDir, "WpfApp1.exe");
+                string newExe = Path.Combine(installDir, "browser.exe");
+
+                if (!IOFile.Exists(oldExe))
+                    throw new Exception("WpfApp1.exe not found");
+
+                if (IOFile.Exists(newExe))
+                    IOFile.Delete(newExe);
+
+                IOFile.Move(oldExe, newExe);
+
+                // ===== ADDON SAVE =====
+                if (AddonCodeBox.IsEnabled && !string.IsNullOrWhiteSpace(AddonCodeBox.Text))
+                {
+                    string addonsDir = Path.Combine(installDir, "addons");
+                    Directory.CreateDirectory(addonsDir);
+
+                    string addonPath = Path.Combine(addonsDir, "useraddon.txt");
+                    IOFile.WriteAllText(addonPath, AddonCodeBox.Text);
+                }
+
+                // ===== SHORTCUT =====
+                CreateDesktopShortcut(newExe);
 
                 InstallProgress.Value = 100;
                 InstallStatusLabel.Content = "Installation complete!";
-                MessageBox.Show("Installation complete!", "Done", MessageBoxButton.OK, MessageBoxImage.Information);
+
+                MessageBox.Show("Installation complete!", "Done");
+
                 FinishButton.IsEnabled = true;
                 CancelButton.IsEnabled = false;
             }
             catch (OperationCanceledException)
             {
-                InstallStatusLabel.Content = "Installation cancelled!";
+                InstallStatusLabel.Content = "Cancelled!";
                 InstallProgress.Value = 0;
                 InstallButton.IsEnabled = true;
                 CancelButton.IsEnabled = false;
@@ -178,17 +232,27 @@ namespace WpfInstaller
         private void CreateDesktopShortcut(string targetPath)
         {
             string desk = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-            string shortcutPath = System.IO.Path.Combine(desk, "browser.lnk");
+            string name = Path.GetFileNameWithoutExtension(targetPath);
+            string shortcutPath = Path.Combine(desk, name + ".lnk");
 
-            var shell = new WshShell();
-            IWshShortcut shortcut = (IWshShortcut)shell.CreateShortcut(shortcutPath);
-            shortcut.Description = "Browser app";
+            var shell = new IWshRuntimeLibrary.WshShell();
+            IWshRuntimeLibrary.IWshShortcut shortcut =
+                (IWshRuntimeLibrary.IWshShortcut)shell.CreateShortcut(shortcutPath);
+
+            string? dir = Path.GetDirectoryName(targetPath);
+            if (dir == null)
+                throw new Exception("Invalid exe path");
+
+            shortcut.Description = name;
             shortcut.TargetPath = targetPath;
-            shortcut.WorkingDirectory = System.IO.Path.GetDirectoryName(targetPath)!;
+            shortcut.WorkingDirectory = dir;
             shortcut.IconLocation = targetPath + ",0";
             shortcut.Save();
         }
 
-        private void Finish_Click(object sender, RoutedEventArgs e) => Close();
+        private void Finish_Click(object sender, RoutedEventArgs e)
+        {
+            Close();
+        }
     }
 }
